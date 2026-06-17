@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#0a3d62">
+<meta name="description" content="Hungry Whale - eat the ocean, grow into a giant blue whale. 1-day HTML MVP.">
+<title>🐳 Hungry Whale — Eat the Ocean</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    background: linear-gradient(180deg, #0a3d62 0%, #1e5f8e 30%, #2980b9 60%, #3498db 100%);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    color: #fff;
+    user-select: none;
+    touch-action: none;
+    position: relative;
+  }
+  /* Light rays / bubbles background */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background:
+      radial-gradient(ellipse at 20% 10%, rgba(255,255,255,0.15) 0%, transparent 40%),
+      radial-gradient(ellipse at 80% 30%, rgba(255,255,255,0.1) 0%, transparent 35%),
+      radial-gradient(ellipse at 50% 70%, rgba(255,255,255,0.08) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  #game {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    cursor: grab;
+    z-index: 1;
+  }
+  #game.dragging { cursor: grabbing; }
+  /* HUD */
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0;
+    padding: 14px 18px;
+    display: flex; justify-content: space-between; align-items: center;
+    pointer-events: none;
+    z-index: 10;
+    text-shadow: 0 2px 6px rgba(0,0,0,0.5);
+  }
+  .hud-cell {
+    background: rgba(0,0,0,0.35);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    padding: 8px 14px;
+    border-radius: 999px;
+    font-size: 16px;
+    font-weight: 600;
+    display: flex; gap: 8px; align-items: center;
+  }
+  #hearts { color: #ff6b6b; letter-spacing: 4px; }
+  #hearts.lost { opacity: 0.3; }
+  /* Title screen */
+  .overlay {
+    position: fixed; inset: 0;
+    background: rgba(10, 61, 98, 0.85);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 20;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 32px;
+    text-align: center;
+  }
+  .overlay h1 { font-size: 42px; margin-bottom: 8px; }
+  .overlay .sub { font-size: 16px; opacity: 0.85; margin-bottom: 28px; max-width: 320px; line-height: 1.5; }
+  .overlay .emoji-row { font-size: 48px; margin-bottom: 16px; letter-spacing: 8px; }
+  .btn {
+    background: linear-gradient(135deg, #48dbfb 0%, #0abde3 100%);
+    color: #062c4d;
+    font-size: 18px;
+    font-weight: 700;
+    padding: 14px 36px;
+    border: none;
+    border-radius: 999px;
+    cursor: pointer;
+    box-shadow: 0 4px 20px rgba(72, 219, 251, 0.4);
+    pointer-events: auto;
+    transition: transform 0.1s;
+  }
+  .btn:active { transform: scale(0.95); }
+  .legend {
+    margin-top: 28px;
+    font-size: 14px;
+    opacity: 0.8;
+    line-height: 1.7;
+  }
+  .legend span { display: inline-block; width: 24px; }
+  .hidden { display: none !important; }
+  /* Game over flash */
+  .shake { animation: shake 0.4s; }
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-8px) rotate(-2deg); }
+    40% { transform: translateX(8px) rotate(2deg); }
+    60% { transform: translateX(-6px) rotate(-1deg); }
+    80% { transform: translateX(6px) rotate(1deg); }
+  }
+  /* Score popup */
+  .pop {
+    position: fixed;
+    pointer-events: none;
+    z-index: 5;
+    font-size: 24px;
+    font-weight: 800;
+    color: #ffd93d;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.6);
+    animation: popUp 0.8s ease-out forwards;
+  }
+  @keyframes popUp {
+    0% { transform: translate(-50%, 0) scale(0.5); opacity: 0; }
+    20% { transform: translate(-50%, -10px) scale(1.2); opacity: 1; }
+    100% { transform: translate(-50%, -50px) scale(1); opacity: 0; }
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud">
+  <div class="hud-cell" id="hearts">❤️❤️❤️</div>
+  <div class="hud-cell">🍤 <span id="score">0</span>/<span id="goal">10</span></div>
+</div>
+
+<div class="overlay" id="titleScreen">
+  <div class="emoji-row">🐟</div>
+  <h1>Hungry Whale</h1>
+  <p class="sub">Drag the whale around the ocean. Eat small fish to grow. Avoid boats and nets. Clear 10 to win the level.</p>
+  <button class="btn" id="startBtn">🌊 Dive In</button>
+  <div class="legend">
+    <div><span>🐟</span> Eat — grow bigger</div>
+    <div><span>🪼</span> Eat — bonus +2</div>
+    <div><span>🪸</span> Eat — slow you down</div>
+    <div><span>🚢</span> AVOID — lose a heart</div>
+    <div><span>🪢</span> AVOID — lose a heart</div>
+  </div>
+</div>
+
+<div class="overlay hidden" id="winScreen">
+  <div class="emoji-row">🐳✨</div>
+  <h1>Level Clear!</h1>
+  <p class="sub" id="winStats">You grew to size X in Y seconds</p>
+  <button class="btn" id="nextBtn">🌊 Next Level</button>
+</div>
+
+<div class="overlay hidden" id="loseScreen">
+  <div class="emoji-row">🥺</div>
+  <h1>Out of Hearts</h1>
+  <p class="sub">The whale needs to rest. Try again?</p>
+  <button class="btn" id="retryBtn">🔁 Retry</button>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  // ---------- Setup canvas ----------
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const scoreEl = document.getElementById('score');
+  const goalEl = document.getElementById('goal');
+  const heartsEl = document.getElementById('hearts');
+  const titleScreen = document.getElementById('titleScreen');
+  const winScreen = document.getElementById('winScreen');
+  const loseScreen = document.getElementById('loseScreen');
+
+  let W = 0, H = 0, DPR = 1;
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W * DPR;
+    canvas.height = H * DPR;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ---------- Game state ----------
+  const state = {
+    running: false,
+    whale: { x: 0, y: 0, vx: 0, vy: 0, size: 28, targetSize: 28, eaten: 0, drag: false, offX: 0, offY: 0 },
+    food: [],
+    obstacles: [],
+    bubbles: [],
+    score: 0,
+    goal: 10,
+    hearts: 3,
+    level: 1,
+    startTime: 0,
+    lastSpawn: 0,
+    lastObstacle: 0,
+  };
+
+  const FOOD_TYPES = [
+    { emoji: '🐟', points: 1, radius: 10, speed: 0.6 },
+    { emoji: '🐠', points: 1, radius: 10, speed: 0.5 },
+    { emoji: '🦐', points: 1, radius: 8, speed: 0.7 },
+    { emoji: '🪼', points: 2, radius: 14, speed: 0.4, glow: true },
+    { emoji: '🪸', points: 1, radius: 14, speed: 0, static: true },
+  ];
+
+  const OBSTACLE_TYPES = [
+    { emoji: '🚢', radius: 28, speed: 0.25, dir: 1 },
+    { emoji: '🪢', radius: 18, speed: 0.5, dir: -1 },
+    { emoji: '🦈', radius: 22, speed: 0.7, dir: 1, chase: true },
+  ];
+
+  function rand(min, max) { return min + Math.random() * (max - min); }
+  function randInt(min, max) { return Math.floor(rand(min, max + 1)); }
+
+  function resetLevel() {
+    state.whale.x = W / 2;
+    state.whale.y = H / 2;
+    state.whale.vx = 0; state.whale.vy = 0;
+    state.whale.size = 28;
+    state.whale.targetSize = 28;
+    state.whale.eaten = 0;
+    state.whale.drag = false;
+    state.food = [];
+    state.obstacles = [];
+    state.score = 0;
+    state.goal = 10 + (state.level - 1) * 5;
+    state.hearts = 3;
+    state.startTime = performance.now();
+    state.lastSpawn = 0;
+    state.lastObstacle = 0;
+    updateHUD();
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = state.score;
+    goalEl.textContent = state.goal;
+    let hearts = '';
+    for (let i = 0; i < 3; i++) hearts += i < state.hearts ? '❤️' : '🖤';
+    heartsEl.textContent = hearts;
+  }
+
+  function spawnFood() {
+    const type = FOOD_TYPES[Math.random() < 0.18 ? 3 : (Math.random() < 0.12 ? 4 : randInt(0, 2))];
+    let x, y;
+    if (type.static) {
+      // Coral: stick to bottom/sides
+      x = Math.random() < 0.5 ? rand(20, W - 20) : (Math.random() < 0.5 ? 20 : W - 20);
+      y = Math.random() < 0.5 ? rand(20, H / 2) : rand(H / 2, H - 20);
+    } else {
+      x = rand(20, W - 20);
+      y = rand(20, H - 20);
+    }
+    state.food.push({
+      type, x, y,
+      vx: type.static ? 0 : rand(-type.speed, type.speed),
+      vy: type.static ? 0 : rand(-type.speed, type.speed),
+      angle: Math.random() * Math.PI * 2,
+      phase: Math.random() * Math.PI * 2,
+    });
+  }
+
+  function spawnObstacle() {
+    const type = OBSTACLE_TYPES[randInt(0, OBSTACLE_TYPES.length - 1)];
+    const fromLeft = Math.random() < 0.5;
+    state.obstacles.push({
+      type,
+      x: fromLeft ? -type.radius * 2 : W + type.radius * 2,
+      y: rand(60, H - 60),
+      vx: type.dir * type.speed * (1 + state.level * 0.1),
+      vy: rand(-0.2, 0.2),
+      age: 0,
+    });
+  }
+
+  function spawnBubble() {
+    state.bubbles.push({
+      x: rand(0, W),
+      y: H + 10,
+      r: rand(2, 6),
+      vy: rand(-1.2, -0.5),
+      vx: rand(-0.3, 0.3),
+      alpha: rand(0.3, 0.7),
+    });
+  }
+
+  function showPop(text, x, y) {
+    const el = document.createElement('div');
+    el.className = 'pop';
+    el.textContent = text;
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 800);
+  }
+
+  function startGame() {
+    state.level = 1;
+    resetLevel();
+    state.running = true;
+    titleScreen.classList.add('hidden');
+    winScreen.classList.add('hidden');
+    loseScreen.classList.add('hidden');
+  }
+
+  function nextLevel() {
+    state.level++;
+    resetLevel();
+    state.running = true;
+    winScreen.classList.add('hidden');
+  }
+
+  function retry() {
+    resetLevel();
+    state.running = true;
+    loseScreen.classList.add('hidden');
+  }
+
+  function winGame() {
+    state.running = false;
+    const elapsed = Math.round((performance.now() - state.startTime) / 1000);
+    document.getElementById('winStats').textContent =
+      `Level ${state.level} — you grew to size ${Math.round(state.whale.size)} in ${elapsed}s`;
+    winScreen.classList.remove('hidden');
+  }
+
+  function loseGame() {
+    state.running = false;
+    loseScreen.classList.remove('hidden');
+  }
+
+  // ---------- Input ----------
+  function getPos(e) {
+    if (e.touches && e.touches.length) {
+      return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    }
+    return { x: e.clientX, y: e.clientY };
+  }
+
+  function onDown(e) {
+    if (!state.running) return;
+    e.preventDefault();
+    const p = getPos(e);
+    const dx = p.x - state.whale.x;
+    const dy = p.y - state.whale.y;
+    if (dx * dx + dy * dy < 80 * 80) {
+      state.whale.drag = true;
+      state.whale.offX = dx;
+      state.whale.offY = dy;
+      canvas.classList.add('dragging');
+    } else {
+      // tap-to-move target
+      state.whale.vx = (p.x - state.whale.x) * 0.05;
+      state.whale.vy = (p.y - state.whale.y) * 0.05;
+    }
+  }
+
+  function onMove(e) {
+    if (!state.running || !state.whale.drag) return;
+    e.preventDefault();
+    const p = getPos(e);
+    state.whale.x = p.x - state.whale.offX;
+    state.whale.y = p.y - state.whale.offY;
+    state.whale.vx = 0; state.whale.vy = 0;
+  }
+
+  function onUp() {
+    state.whale.drag = false;
+    canvas.classList.remove('dragging');
+  }
+
+  canvas.addEventListener('mousedown', onDown);
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+  canvas.addEventListener('touchstart', onDown, { passive: false });
+  window.addEventListener('touchmove', onMove, { passive: false });
+  window.addEventListener('touchend', onUp);
+
+  document.getElementById('startBtn').addEventListener('click', startGame);
+  document.getElementById('nextBtn').addEventListener('click', nextLevel);
+  document.getElementById('retryBtn').addEventListener('click', retry);
+
+  // ---------- Game loop ----------
+  let last = performance.now();
+  function tick(now) {
+    const dt = Math.min((now - last) / 16.67, 2); // dt in ~frames
+    last = now;
+    if (state.running) update(dt, now);
+    render();
+    requestAnimationFrame(tick);
+  }
+
+  function update(dt, now) {
+    const w = state.whale;
+    // whale momentum if not dragging
+    if (!w.drag) {
+      w.x += w.vx * dt;
+      w.y += w.vy * dt;
+      w.vx *= 0.94;
+      w.vy *= 0.94;
+    }
+    // clamp
+    w.x = Math.max(w.size, Math.min(W - w.size, w.x));
+    w.y = Math.max(w.size + 40, Math.min(H - w.size - 10, w.y));
+    // grow target
+    w.targetSize = 28 + w.eaten * 1.2;
+    w.size += (w.targetSize - w.size) * 0.08;
+
+    // spawn food
+    state.lastSpawn += dt;
+    if (state.lastSpawn > 35 && state.food.length < 18) {
+      spawnFood();
+      state.lastSpawn = 0;
+    }
+    // spawn obstacles (after warmup)
+    state.lastObstacle += dt;
+    if (now - state.startTime > 3000 && state.lastObstacle > Math.max(70, 130 - state.level * 8)) {
+      spawnObstacle();
+      state.lastObstacle = 0;
+    }
+
+    // update food
+    for (let i = state.food.length - 1; i >= 0; i--) {
+      const f = state.food[i];
+      if (!f.type.static) {
+        f.x += f.vx * dt;
+        f.y += f.vy * dt;
+        f.angle += 0.01 * dt;
+        f.phase += 0.04 * dt;
+        // wrap
+        if (f.x < -20) f.x = W + 20;
+        if (f.x > W + 20) f.x = -20;
+        if (f.y < 20) f.y = H - 20;
+        if (f.y > H - 20) f.y = 20;
+      }
+      // eat check
+      const dx = f.x - w.x;
+      const dy = f.y - w.y;
+      const d2 = dx * dx + dy * dy;
+      const eatR = w.size * 0.7;
+      if (d2 < eatR * eatR) {
+        w.eaten += f.type.points;
+        state.score += f.type.points;
+        showPop(`+${f.type.points}`, f.x, f.y);
+        state.food.splice(i, 1);
+        updateHUD();
+        if (state.score >= state.goal) {
+          winGame();
+          return;
+        }
+      }
+    }
+
+    // update obstacles
+    for (let i = state.obstacles.length - 1; i >= 0; i--) {
+      const o = state.obstacles[i];
+      o.x += o.vx * dt;
+      o.y += o.vy * dt;
+      o.age += dt;
+      if (o.x < -80 || o.x > W + 80 || o.y < -80 || o.y > H + 80) {
+        state.obstacles.splice(i, 1);
+        continue;
+      }
+      // collision
+      const dx = o.x - w.x;
+      const dy = o.y - w.y;
+      const d2 = dx * dx + dy * dy;
+      const hitR = (w.size * 0.65) + o.type.radius * 0.5;
+      if (d2 < hitR * hitR) {
+        state.hearts--;
+        canvas.classList.add('shake');
+        setTimeout(() => canvas.classList.remove('shake'), 400);
+        showPop('💔', o.x, o.y);
+        // knockback
+        w.vx = -dx * 0.15;
+        w.vy = -dy * 0.15;
+        state.obstacles.splice(i, 1);
+        updateHUD();
+        if (state.hearts <= 0) {
+          loseGame();
+          return;
+        }
+      }
+    }
+
+    // bubbles background
+    if (Math.random() < 0.3) spawnBubble();
+    for (let i = state.bubbles.length - 1; i >= 0; i--) {
+      const b = state.bubbles[i];
+      b.y += b.vy * dt;
+      b.x += b.vx * dt + Math.sin(b.y * 0.02) * 0.3;
+      if (b.y < -10) state.bubbles.splice(i, 1);
+    }
+  }
+
+  function render() {
+    // clear with translucent overlay for trail effect
+    ctx.fillStyle = 'rgba(10, 61, 98, 0.25)';
+    ctx.fillRect(0, 0, W, H);
+
+    // bubbles
+    for (const b of state.bubbles) {
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255,255,255,${b.alpha})`;
+      ctx.fill();
+    }
+
+    // food
+    for (const f of state.food) {
+      const wob = f.type.static ? 0 : Math.sin(f.phase) * 0.08;
+      ctx.save();
+      ctx.translate(f.x, f.y);
+      ctx.rotate(wob);
+      ctx.font = `${f.type.radius * 2.4}px serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      if (f.type.glow) {
+        ctx.shadowColor = '#48dbfb';
+        ctx.shadowBlur = 18;
+      }
+      ctx.fillText(f.type.emoji, 0, 0);
+      ctx.restore();
+    }
+
+    // obstacles
+    for (const o of state.obstacles) {
+      ctx.save();
+      ctx.translate(o.x, o.y);
+      const bob = Math.sin(o.age * 0.05) * 0.06;
+      ctx.rotate(o.type.dir > 0 ? bob : -bob);
+      ctx.font = `${o.type.radius * 2.2}px serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(o.type.emoji, 0, 0);
+      ctx.restore();
+    }
+
+    // whale (always on top)
+    const w = state.whale;
+    ctx.save();
+    ctx.translate(w.x, w.y);
+    const wBob = Math.sin(performance.now() * 0.003) * 0.05;
+    ctx.rotate(w.drag ? 0 : wBob);
+    // tail wag
+    const tailWag = Math.sin(performance.now() * 0.008) * 0.15;
+    ctx.save();
+    ctx.translate(-w.size * 0.9, 0);
+    ctx.rotate(tailWag);
+    ctx.font = `${w.size * 1.2}px serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('💦', 0, 0);
+    ctx.restore();
+    // body
+    ctx.font = `${w.size * 2}px serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    // shadow ring if dragging
+    if (w.drag) {
+      ctx.shadowColor = '#ffd93d';
+      ctx.shadowBlur = 25;
+    }
+    ctx.fillText('🐋', 0, 0);
+    ctx.restore();
+  }
+
+  // Spawn a few initial food for the title screen vibe
+  for (let i = 0; i < 8; i++) spawnFood();
+  for (let i = 0; i < 3; i++) {
+    const f = state.food[i];
+    f.x = rand(50, W - 50);
+    f.y = rand(50, H - 50);
+  }
+
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>

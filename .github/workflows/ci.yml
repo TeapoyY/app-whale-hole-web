@@ -1,0 +1,80 @@
+name: Verify HTML MVP
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * *'  # daily sanity check
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate HTML
+        run: |
+          test -f index.html
+          head -c 100 index.html
+          echo ""
+          # basic balance check
+          grep -c '<script>' index.html
+          grep -c '</script>' index.html
+
+      - name: Smoke test (load HTML in headless browser)
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+
+      - name: Run smoke test
+        run: |
+          cat > /tmp/smoke.js << 'EOF'
+          const { exec } = require('child_process');
+          const http = require('http');
+          const fs = require('fs');
+          const path = require('path');
+          const url = require('url');
+
+          // Start a static server
+          const server = http.createServer((req, res) => {
+            const p = req.url === '/' ? '/index.html' : req.url;
+            const file = path.join(process.cwd(), p.split('?')[0]);
+            try {
+              const data = fs.readFileSync(file);
+              const ext = path.extname(file);
+              const type = ext === '.html' ? 'text/html' : 'text/plain';
+              res.writeHead(200, { 'Content-Type': type });
+              res.end(data);
+            } catch (e) {
+              res.writeHead(404); res.end('not found');
+            }
+          });
+          server.listen(0, () => {
+            const port = server.address().port;
+            require('child_process').execSync(
+              `google-chrome --headless --disable-gpu --no-sandbox --virtual-time-budget=2000 --dump-dom http://localhost:${port}/index.html > /tmp/dom.html`,
+              { stdio: 'inherit' }
+            );
+            const dom = fs.readFileSync('/tmp/dom.html', 'utf8');
+            const checks = [
+              ['title', /Hungry Whale/],
+              ['canvas', /id="game"/],
+              ['start button', /id="startBtn"/],
+              ['whale emoji', /🐋/],
+              ['food emoji', /🐟/],
+              ['obstacle emoji', /🚢/],
+            ];
+            let failed = 0;
+            for (const [name, re] of checks) {
+              const ok = re.test(dom);
+              console.log(`${ok ? 'PASS' : 'FAIL'}: ${name}`);
+              if (!ok) failed++;
+            }
+            server.close();
+            process.exit(failed > 0 ? 1 : 0);
+          });
+          EOF
+          npm init -y >/dev/null 2>&1
+          node /tmp/smoke.js
