@@ -17,64 +17,42 @@ jobs:
       - name: Validate HTML
         run: |
           test -f index.html
-          head -c 100 index.html
-          echo ""
-          # basic balance check
+          wc -l index.html
           grep -c '<script>' index.html
           grep -c '</script>' index.html
 
-      - name: Smoke test (load HTML in headless browser)
+      - name: Setup Chrome
         uses: browser-actions/setup-chrome@v1
         with:
           chrome-version: stable
 
-      - name: Run smoke test
+      - name: Smoke test (load HTML, check key elements)
         run: |
-          cat > /tmp/smoke.js << 'EOF'
-          const { exec } = require('child_process');
-          const http = require('http');
-          const fs = require('fs');
-          const path = require('path');
-          const url = require('url');
-
-          // Start a static server
-          const server = http.createServer((req, res) => {
-            const p = req.url === '/' ? '/index.html' : req.url;
-            const file = path.join(process.cwd(), p.split('?')[0]);
-            try {
-              const data = fs.readFileSync(file);
-              const ext = path.extname(file);
-              const type = ext === '.html' ? 'text/html' : 'text/plain';
-              res.writeHead(200, { 'Content-Type': type });
-              res.end(data);
-            } catch (e) {
-              res.writeHead(404); res.end('not found');
-            }
-          });
-          server.listen(0, () => {
-            const port = server.address().port;
-            require('child_process').execSync(
-              `google-chrome --headless --disable-gpu --no-sandbox --virtual-time-budget=2000 --dump-dom http://localhost:${port}/index.html > /tmp/dom.html`,
-              { stdio: 'inherit' }
-            );
-            const dom = fs.readFileSync('/tmp/dom.html', 'utf8');
-            const checks = [
-              ['title', /Hungry Whale/],
-              ['canvas', /id="game"/],
-              ['start button', /id="startBtn"/],
-              ['whale emoji', /🐋/],
-              ['food emoji', /🐟/],
-              ['obstacle emoji', /🚢/],
-            ];
-            let failed = 0;
-            for (const [name, re] of checks) {
-              const ok = re.test(dom);
-              console.log(`${ok ? 'PASS' : 'FAIL'}: ${name}`);
-              if (!ok) failed++;
-            }
-            server.close();
-            process.exit(failed > 0 ? 1 : 0);
-          });
-          EOF
-          npm init -y >/dev/null 2>&1
-          node /tmp/smoke.js
+          # Start a static server in background
+          nohup python3 -m http.server 8765 > /tmp/http.log 2>&1 &
+          sleep 2
+          # Headless Chrome dump DOM
+          timeout 30 google-chrome \
+            --headless \
+            --disable-gpu \
+            --no-sandbox \
+            --disable-dev-shm-usage \
+            --virtual-time-budget=3000 \
+            --dump-dom http://localhost:8765/index.html > /tmp/dom.html 2>/tmp/chrome.log
+          EXIT=$?
+          pkill -f "http.server 8765" 2>/dev/null
+          echo "Chrome exit: $EXIT"
+          echo "--- DOM head ---"
+          head -c 500 /tmp/dom.html
+          echo ""
+          echo "--- Checks ---"
+          FAIL=0
+          for sym in 'Hungry Whale' 'id="game"' 'id="startBtn"' '🐋' '🐟' '🚢' '🪼' '🦈'; do
+            if grep -q "$sym" /tmp/dom.html; then
+              echo "PASS: contains '$sym'"
+            else
+              echo "FAIL: missing '$sym'"
+              FAIL=1
+            fi
+          done
+          exit $FAIL
